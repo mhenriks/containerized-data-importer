@@ -12,8 +12,8 @@
 #See the License for the specific language governing permissions and
 #limitations under the License.
 
-.PHONY: build build-controller build-importer build-apiserver build-functest-image-init build-functest-image-http build-functest \
-		docker docker-controller docker-cloner docker-importer docker-apiserver docker-functest-image-init docker-functest-image-http\
+.PHONY: build build-controller build-importer build-apiserver build-uploadproxy build-functest-image-init build-functest-image-http build-functest \
+		docker docker-controller docker-cloner docker-importer docker-apiserver docker-uploadproxy docker-functest-image-init docker-functest-image-http\
 		cluster-sync cluster-sync-controller cluster-sync-cloner cluster-sync-importer \
 		test test-functional test-unit \
 		publish \
@@ -44,6 +44,8 @@ build-importer: WHAT = cmd/cdi-importer
 build-importer: build
 build-apiserver: WHAT = cmd/cdi-apiserver
 build-apiserver: build
+build-uploadproxy: WHAT = cmd/cdi-uploadproxy
+build-uploadproxy: build
 # Note, the cloner is a bash script and has nothing to build
 build-functest-image-init: WHAT = tools/cdi-func-test-file-host-init
 build-functest-image-init: build
@@ -74,6 +76,8 @@ docker-cloner: WHAT = cmd/cdi-cloner
 docker-cloner: docker
 docker-apiserver: WHAT = cmd/cdi-apiserver
 docker-apiserver: docker
+docker-uploadproxy: WHAT = cmd/cdi-uploadproxy
+docker-uploadproxy: docker
 docker-functest-image-init: WHAT = tools/cdi-func-test-file-host-init
 docker-functest-image-init: docker
 docker-functest-image-http: WHAT = tools/cdi-func-test-file-host-http
@@ -90,6 +94,8 @@ push-cloner: WHAT = cdm/cdi-cloner
 push-cloner: push
 push-apiserver: WHAT = cmd/cdi-apiserver
 push-apiserver: push
+push-uploadproxy: WHAT = cmd/cdi-uploadproxy
+push-uploadproxy: push
 
 publish: docker
 	./hack/build/build-docker.sh publish ${WHAT}

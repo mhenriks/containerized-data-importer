@@ -12,9 +12,9 @@
 #See the License for the specific language governing permissions and
 #limitations under the License.
 
-.PHONY: build build-controller build-importer build-apiserver build-uploadproxy \
-		docker docker-controller docker-cloner docker-importer docker-apiserver docker-uploadproxy \
-		cluster-sync cluster-sync-controller cluster-sync-cloner cluster-sync-importer \
+.PHONY: build build-controller build-importer build-apiserver build-uploadproxy build-uploadserver \
+		docker docker-controller docker-cloner docker-importer docker-apiserver docker-uploadproxy docker-uploadproxy \
+		cluster-sync cluster-sync-controller cluster-sync-cloner cluster-sync-importer cluster-sync-apiserver cluster-sync-uploadproxy cluster-sync-uploadserver \
 		test test-functional test-unit \
 		publish \
 		vet \
@@ -47,6 +47,8 @@ build-apiserver: WHAT = cmd/cdi-apiserver
 build-apiserver: build
 build-uploadproxy: WHAT = cmd/cdi-uploadproxy
 build-uploadproxy: build
+build-uploadserver: WHAT = cmd/cdi-uploadserver
+build-uploadserver: build
 # Note, the cloner is a bash script and has nothing to build
 
 test:
@@ -70,6 +72,8 @@ docker-apiserver: WHAT = cmd/cdi-apiserver
 docker-apiserver: docker
 docker-uploadproxy: WHAT = cmd/cdi-uploadproxy
 docker-uploadproxy: docker
+docker-uploadserver: WHAT = cmd/cdi-uploadserver
+docker-uploadserver: docker
 
 push: docker
 	./hack/build/build-docker.sh push ${WHAT}
@@ -84,6 +88,8 @@ push-apiserver: WHAT = cmd/cdi-apiserver
 push-apiserver: push
 push-uploadproxy: WHAT = cmd/cdi-uploadproxy
 push-uploadproxy: push
+push-uploadserver: WHAT = cmd/cdi-uploadserver
+push-uploadserver: push
 
 publish: docker
 	./hack/build/build-docker.sh publish ${WHAT}
@@ -118,6 +124,12 @@ cluster-sync-importer: WHAT = cmd/cdi-importer
 cluster-sync-importer: cluster-sync
 cluster-sync-cloner: WHAT = cmd/cdi-cloner
 cluster-sync-cloner: cluster-sync
+cluster-sync-apiserver: WHAT = cmd/cdi-apiserver
+cluster-sync-apiserver: cluster-sync
+cluster-sync-uploadproxy: WHAT = cmd/cdi-uploadproxy
+cluster-sync-uploadproxy: cluster-sync
+cluster-sync-uploadserver: WHAT = cmd/cdi-uploadserver
+cluster-sync-uploadserver: cluster-sync
 
 functest:
 	./hack/build/functests.sh

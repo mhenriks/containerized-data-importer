@@ -62,22 +62,32 @@ const (
 	RdrMulti
 	RdrTar
 	RdrXz
+	RdrStream
 )
 
 // map scheme and format to RdrType
 var rdrTypM = map[string]int{
-	"gz":    RdrGz,
-	"http":  RdrHttp,
-	"https": RdrHttp,
-	"local": RdrFile,
-	"s3":    RdrS3,
-	"tar":   RdrTar,
-	"xz":    RdrXz,
+	"gz":     RdrGz,
+	"http":   RdrHttp,
+	"https":  RdrHttp,
+	"local":  RdrFile,
+	"s3":     RdrS3,
+	"tar":    RdrTar,
+	"xz":     RdrXz,
+	"stream": RdrStream,
 }
 
 // Return a dataStream object after validating the endpoint and constructing the reader/closer chain.
 // Note: the caller must close the `Readers` in reverse order. See Close().
 func NewDataStream(endpt, accKey, secKey string) (*dataStream, error) {
+	return newDataStream(endpt, accKey, secKey, nil)
+}
+
+func newDataStreamFromStream(stream io.ReadCloser) (*dataStream, error) {
+	return newDataStream(fmt.Sprintf("stream://%p", stream), "", "", stream)
+}
+
+func newDataStream(endpt, accKey, secKey string, stream io.ReadCloser) (*dataStream, error) {
 	if len(accKey) == 0 || len(secKey) == 0 {
 		glog.V(Vadmin).Infof("%s and/or %s are empty\n", IMPORTER_ACCESS_KEY_ID, IMPORTER_SECRET_KEY)
 	}
@@ -93,7 +103,7 @@ func NewDataStream(endpt, accKey, secKey string) (*dataStream, error) {
 	}
 
 	// establish readers for endpoint's formats and do initial calc of size of raw endpt
-	err = ds.constructReaders()
+	err = ds.constructReaders(stream)
 	if err != nil {
 		return nil, errors.Wrapf(err, "unable to construct readers")
 	}
@@ -111,12 +121,12 @@ func NewDataStream(endpt, accKey, secKey string) (*dataStream, error) {
 
 // Read from top-most reader. Note: ReadFull is needed since there may be intermediate,
 // smaller multi-readers in the reader stack, and we need to be able to fill buf.
-func (d dataStream) Read(buf []byte) (int, error) {
+func (d *dataStream) Read(buf []byte) (int, error) {
 	return io.ReadFull(d.topReader(), buf)
 }
 
 // Close all readers.
-func (d dataStream) Close() error {
+func (d *dataStream) Close() error {
 	return closeReaders(d.Readers)
 }
 
@@ -141,7 +151,11 @@ func (d *dataStream) dataStreamSelector() (err error) {
 	return err
 }
 
-func (d dataStream) s3() (io.ReadCloser, error) {
+func (d *dataStream) addStream(reader io.ReadCloser) {
+	d.appendReader(rdrTypM["stream"], reader)
+}
+
+func (d *dataStream) s3() (io.ReadCloser, error) {
 	glog.V(Vdebug).Infoln("Using S3 client to get data")
 	bucket := d.Url.Host
 	object := strings.Trim(d.Url.Path, "/")
@@ -157,7 +171,7 @@ func (d dataStream) s3() (io.ReadCloser, error) {
 	return objectReader, nil
 }
 
-func (d dataStream) http() (io.ReadCloser, error) {
+func (d *dataStream) http() (io.ReadCloser, error) {
 	client := http.Client{
 		CheckRedirect: func(r *http.Request, via []*http.Request) error {
 			r.SetBasicAuth(d.accessKeyId, d.secretKey) // Redirects will lose basic auth, so reset them manually
@@ -183,7 +197,7 @@ func (d dataStream) http() (io.ReadCloser, error) {
 	return resp.Body, nil
 }
 
-func (d dataStream) local() (io.ReadCloser, error) {
+func (d *dataStream) local() (io.ReadCloser, error) {
 	// temporary local import deprecation notice
 	glog.Warningf("\nDEPRECATION NOTICE:\n   Support for local (file://) endpoints will be removed from CDI in the next release.\n   There is no replacement and no work-around.\n   All import endpoints must reference http(s) or s3 endpoints\n")
 	fn := d.Url.Path
@@ -201,10 +215,25 @@ func CopyImage(dest, endpoint, accessKey, secKey string) error {
 	glog.V(Vuser).Infof("copying %q to %q...\n", endpoint, dest)
 	ds, err := NewDataStream(endpoint, accessKey, secKey)
 	if err != nil {
-		return errors.Wrapf(err, "unable to create data stream")
+		return errors.Wrap(err, "unable to create data stream")
 	}
 	defer ds.Close()
 	return ds.copy(dest)
+}
+
+// SaveStream reads from a stream and saves data to dest
+func SaveStream(stream io.ReadCloser, dest string) (int64, error) {
+	glog.V(Vuser).Infof("Saving stream to %q...\n", dest)
+	ds, err := newDataStreamFromStream(stream)
+	if err != nil {
+		return 0, errors.Wrapf(err, "unable to create data stream from stream")
+	}
+	defer ds.Close()
+	err = ds.copy(dest)
+	if err != nil {
+		return 0, errors.Wrap(err, "data stream copy failed")
+	}
+	return ds.Size, nil
 }
 
 // DEPRECATION NOTICE: Support for local (file://) endpoints will be removed from CDI in the next
@@ -245,12 +274,17 @@ func CopyImage(dest, endpoint, accessKey, secKey string) error {
 //   A particular header format only appears once in the data stream. Eg. foo.gz.gz is not supported.
 // Note: file extensions are ignored.
 // Note: readers are not closed here, see dataStream.Close().
-func (d *dataStream) constructReaders() error {
+func (d *dataStream) constructReaders(stream io.ReadCloser) error {
 	glog.V(Vadmin).Infof("create the initial Reader based on the endpoint's %q scheme", d.Url.Scheme)
-	// create the scheme-specific source reader and append it to dataStream readers stack
-	err := d.dataStreamSelector()
-	if err != nil {
-		return errors.WithMessage(err, "could not get data reader")
+
+	if stream == nil {
+		// create the scheme-specific source reader and append it to dataStream readers stack
+		err := d.dataStreamSelector()
+		if err != nil {
+			return errors.WithMessage(err, "could not get data reader")
+		}
+	} else {
+		d.addStream(stream)
 	}
 
 	// loop through all supported file formats until we do not find a header we recognize
@@ -309,7 +343,7 @@ func (d *dataStream) appendReader(rType int, x interface{}) {
 }
 
 // Return the top-level io.ReadCloser from the receiver Reader "stack".
-func (d dataStream) topReader() io.ReadCloser {
+func (d *dataStream) topReader() io.ReadCloser {
 	return d.Readers[len(d.Readers)-1].Rdr
 }
 
@@ -342,7 +376,7 @@ func (d *dataStream) fileFormatSelector(hdr *image.Header) (err error) {
 //NOTE: size in gz is stored in the last 4 bytes of the file. This probably requires the file
 //  to be decompressed in order to get its original size. For now 0 is returned.
 //TODO: support gz size.
-func (d dataStream) gzReader() (io.ReadCloser, int64, error) {
+func (d *dataStream) gzReader() (io.ReadCloser, int64, error) {
 	gz, err := gzip.NewReader(d.topReader())
 	if err != nil {
 		return nil, 0, errors.Wrap(err, "could not create gzip reader")
@@ -355,7 +389,7 @@ func (d dataStream) gzReader() (io.ReadCloser, int64, error) {
 // Return the size of the endpoint "through the eye" of the previous reader. Note: there is no
 // qcow2 reader so nil is returned so that nothing is appended to the reader stack.
 // Note: size is stored at offset 24 in the qcow2 header.
-func (d dataStream) qcow2NopReader(h *image.Header) (io.Reader, int64, error) {
+func (d *dataStream) qcow2NopReader(h *image.Header) (io.Reader, int64, error) {
 	s := hex.EncodeToString(d.buf[h.SizeOff : h.SizeOff+h.SizeLen])
 	size, err := strconv.ParseInt(s, 16, 64)
 	if err != nil {
@@ -370,7 +404,7 @@ func (d dataStream) qcow2NopReader(h *image.Header) (io.Reader, int64, error) {
 //NOTE: size is not stored in the xz header. This may require the file to be decompressed in
 //  order to get its original size. For now 0 is returned.
 //TODO: support gz size.
-func (d dataStream) xzReader() (io.Reader, int64, error) {
+func (d *dataStream) xzReader() (io.Reader, int64, error) {
 	xz, err := xz.NewReader(d.topReader())
 	if err != nil {
 		return nil, 0, errors.Wrap(err, "could not create xz reader")
@@ -382,7 +416,7 @@ func (d dataStream) xzReader() (io.Reader, int64, error) {
 // Return the tar reader and size of the endpoint "through the eye" of the previous reader.
 // Assumes a single file was archived.
 // Note: the size stored in the header is used rather than raw metadata.
-func (d dataStream) tarReader() (io.Reader, int64, error) {
+func (d *dataStream) tarReader() (io.Reader, int64, error) {
 	tr := tar.NewReader(d.topReader())
 	hdr, err := tr.Next() // advance cursor to 1st (and only) file in tarball
 	if err != nil {
@@ -532,18 +566,18 @@ func copy(r io.Reader, out string, qemu bool) error {
 }
 
 // Return a random temp path with the `src` basename as the prefix and preserving the extension.
-// Eg. "/tmp/disk1d729566c74d1003.img".
+// Eg. "/data/disk1d729566c74d1003.img".
 func randTmpName(src string) string {
 	ext := filepath.Ext(src)
 	base := filepath.Base(src)
 	base = base[:len(base)-len(ext)] // exclude extension
 	randName := make([]byte, 8)
 	rand.Read(randName)
-	return filepath.Join(os.TempDir(), base+hex.EncodeToString(randName)+ext)
+	return filepath.Join(filepath.Dir(src), base+hex.EncodeToString(randName)+ext)
 }
 
 // parseDataPath only used for debugging
-func (d dataStream) parseDataPath() (string, string) {
+func (d *dataStream) parseDataPath() (string, string) {
 	pathSlice := strings.Split(strings.Trim(d.Url.EscapedPath(), "/"), "/")
 	glog.V(Vdebug).Infof("parseDataPath: url path: %v", pathSlice)
 	return pathSlice[0], strings.Join(pathSlice[1:], "/")

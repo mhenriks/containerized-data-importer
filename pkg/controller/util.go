@@ -230,7 +230,7 @@ func MakeImporterPodSpec(image, verbose, pullPolicy, ep, secret string, pvc *v1.
 				LabelImportPvc: pvc.Name,
 			},
 			OwnerReferences: []metav1.OwnerReference{
-				metav1.OwnerReference{
+				{
 					APIVersion:         "v1",
 					Kind:               "PersistentVolumeClaim",
 					Name:               pvc.Name,

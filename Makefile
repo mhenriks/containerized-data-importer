@@ -12,9 +12,15 @@
 #See the License for the specific language governing permissions and
 #limitations under the License.
 
+<<<<<<< HEAD
 .PHONY: build build-controller build-importer build-apiserver build-uploadproxy build-uploadserver \
 		docker docker-controller docker-cloner docker-importer docker-apiserver docker-uploadproxy docker-uploadproxy \
 		cluster-sync cluster-sync-controller cluster-sync-cloner cluster-sync-importer cluster-sync-apiserver cluster-sync-uploadproxy cluster-sync-uploadserver \
+=======
+.PHONY: build build-controller build-importer build-functest-image-init build-functest-image-http build-functest \
+		docker docker-controller docker-cloner docker-importer docker-functest-image-init docker-functest-image-http\
+		cluster-sync cluster-sync-controller cluster-sync-cloner cluster-sync-importer \
+>>>>>>> master
 		test test-functional test-unit \
 		publish \
 		vet \
@@ -36,8 +42,7 @@ clean:
 	${DO} "./hack/build/build-go.sh clean; rm -rf bin/* _out/* manifests/generated/* .coverprofile release-announcement"
 
 build:
-	${DO} "./hack/build/build-go.sh clean && ./hack/build/build-go.sh build ${WHAT} && DOCKER_REPO=${DOCKER_REPO} DOCKER_TAG=${DOCKER_TAG} VERBOSITY=${VERBOSITY} PULL_POLICY=${PULL_POLICY} ./hack/build/build-manifests.sh ${WHAT} && ./hack/build/build-copy-artifacts.sh ${WHAT}"
-
+	${DO} "./hack/build/build-go.sh clean && ./hack/build/build-cdi-func-test-file-host.sh && ./hack/build/build-go.sh build ${WHAT} && DOCKER_REPO=${DOCKER_REPO} DOCKER_TAG=${DOCKER_TAG} VERBOSITY=${VERBOSITY} PULL_POLICY=${PULL_POLICY} ./hack/build/build-manifests.sh ${WHAT} && ./hack/build/build-copy-artifacts.sh ${WHAT}"
 
 build-controller: WHAT = cmd/cdi-controller
 build-controller: build
@@ -50,14 +55,23 @@ build-uploadproxy: build
 build-uploadserver: WHAT = cmd/cdi-uploadserver
 build-uploadserver: build
 # Note, the cloner is a bash script and has nothing to build
+build-functest-image-init: WHAT = tools/cdi-func-test-file-host-init
+build-functest-image-init: build
+build-functest-image-http: WHAT = tools/cdi-func-test-file-host-http
+build-functest-image-http: build
+build-functest:
+	${DO} ./hack/build/build-functest.sh
 
-test:
-	 ${DO} "./hack/build/build-go.sh test ${WHAT}"
+# WHAT must match go tool style package paths for test targets (e.g. ./path/to/my/package/...)
+test: test-unit test-functional
 
-test-unit: WHAT = pkg/
-test-unit: test
-test-functional: WHAT = test/
-test-functional: test
+test-unit: WHAT = ./pkg/...
+test-unit:
+	${DO} "./hack/build/run-tests.sh ${WHAT}"
+
+test-functional:  WHAT = ./tests/...
+test-functional:
+	./hack/build/run-functional-tests.sh ${WHAT} "${TEST_ARGS}"
 
 docker: build
 	./hack/build/build-docker.sh build ${WHAT}
@@ -74,6 +88,10 @@ docker-uploadproxy: WHAT = cmd/cdi-uploadproxy
 docker-uploadproxy: docker
 docker-uploadserver: WHAT = cmd/cdi-uploadserver
 docker-uploadserver: docker
+docker-functest-image-init: WHAT = tools/cdi-func-test-file-host-init
+docker-functest-image-init: docker
+docker-functest-image-http: WHAT = tools/cdi-func-test-file-host-http
+docker-functest-image-http: docker
 
 push: docker
 	./hack/build/build-docker.sh push ${WHAT}
@@ -115,7 +133,10 @@ cluster-up:
 cluster-down:
 	./cluster/down.sh
 
-cluster-sync: build ${WHAT}
+cluster-clean:
+	./cluster/clean.sh
+
+cluster-sync: cluster-clean build ${WHAT}
 	./cluster/sync.sh ${WHAT}
 
 cluster-sync-controller: WHAT = cmd/cdi-controller

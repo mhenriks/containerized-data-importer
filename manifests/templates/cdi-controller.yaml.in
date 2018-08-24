@@ -83,6 +83,10 @@ spec:
           value: {{ .DockerRepo }}/cdi-importer:{{ .DockerTag }}
         - name: CLONER_IMAGE
           value: {{ .DockerRepo }}/cdi-cloner:{{ .DockerTag }}
+        - name: CLONER_IMAGE
+          value: {{ .DockerRepo }}/cdi-cloner:{{ .DockerTag }}
+        - name: UPLOADSERVER_IMAGE
+          value: {{ docker_prefix }}/cdi-uploadserver:{{ docker_tag }}
         - name: PULL_POLICY
           value: {{ .PullPolicy }}
 ---

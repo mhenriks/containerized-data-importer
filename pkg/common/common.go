@@ -1,8 +1,9 @@
 package common
 
 import (
-	"k8s.io/api/core/v1"
 	"time"
+
+	"k8s.io/api/core/v1"
 )
 
 // Common types and constants used by the importer and controller.
@@ -38,6 +39,10 @@ const (
 	CLONER_IMAGE_PATH     = "/tmp/clone/image"
 	CLONER_SOCKET_PATH    = "/tmp/clone/socket"
 	CLONER_SCRIPT_ARGS    = "/tmp/cloner_startup.sh"
+
+	UPLOAD_SERVER_PODNAME       = "uploadserver"
+	UPLOAD_SERVER_DATA_DIR      = IMPORTER_DATA_DIR
+	UPLOAD_SERVER_SERVICE_LABEL = "service"
 
 	// key names expected in credential secret
 	KeyAccess = "accessKeyId"

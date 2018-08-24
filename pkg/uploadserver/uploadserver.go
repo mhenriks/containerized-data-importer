@@ -20,8 +20,10 @@
 package uploadserver
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"sync"
 
 	"github.com/golang/glog"
 	"kubevirt.io/containerized-data-importer/pkg/importer"
@@ -41,22 +43,56 @@ type uploadServerApp struct {
 	bindPort    uint16
 	pvcDir      string
 	destination string
+	mux         *http.ServeMux
+	uploading   bool
+	done        bool
+	doneChan    chan struct{}
+	mutex       sync.Mutex
 }
 
 // NewUploadServer returns a new instance of uploadServerApp
 func NewUploadServer(bindAddress string, bindPort uint16, pvcDir, destination string) UploadServer {
-	return &uploadServerApp{
+	server := &uploadServerApp{
 		bindAddress: bindAddress,
 		bindPort:    bindPort,
 		pvcDir:      pvcDir,
 		destination: destination,
+		mux:         http.NewServeMux(),
+		uploading:   false,
+		done:        false,
+		doneChan:    make(chan struct{}),
 	}
+	server.mux.HandleFunc(uploadPath, server.uploadHandler)
+	return server
 }
 
 func (app *uploadServerApp) Run() error {
-	http.HandleFunc(uploadPath, app.uploadHandler)
+	server := &http.Server{
+		Addr:    fmt.Sprintf("%s:%d", app.bindAddress, app.bindPort),
+		Handler: app,
+	}
 
-	return http.ListenAndServe(fmt.Sprintf("%s:%d", app.bindAddress, app.bindPort), nil)
+	errChan := make(chan error)
+
+	go func() {
+		errChan <- server.ListenAndServe()
+	}()
+
+	var err error
+
+	select {
+	case err = <-errChan:
+		glog.Error("HTTP server returned error %s", err.Error())
+	case <-app.doneChan:
+		glog.Info("Shutting down http server after successful upload")
+		server.Shutdown(context.Background())
+	}
+
+	return err
+}
+
+func (app *uploadServerApp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	app.mux.ServeHTTP(w, r)
 }
 
 func (app *uploadServerApp) uploadHandler(w http.ResponseWriter, r *http.Request) {
@@ -65,11 +101,45 @@ func (app *uploadServerApp) uploadHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	sz, err := importer.SaveStream(r.Body, app.destination)
-	if err != nil {
-		glog.Errorf("Saving stream failed: %s", err)
+	app.mutex.Lock()
+	exit := func() bool {
+		defer app.mutex.Unlock()
+
+		if app.uploading {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return true
+		}
+
+		if app.done {
+			w.WriteHeader(http.StatusConflict)
+			return true
+		}
+
+		app.uploading = true
+		return false
+	}()
+
+	if exit {
+		glog.Warning("Got concurrent upload request")
 		return
 	}
+
+	sz, err := importer.SaveStream(r.Body, app.destination)
+
+	app.mutex.Lock()
+	defer app.mutex.Unlock()
+
+	if err != nil {
+		glog.Errorf("Saving stream failed: %s", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		app.uploading = false
+		return
+	}
+
+	app.uploading = false
+	app.done = true
+
+	close(app.doneChan)
 
 	glog.Infof("Wrote %d bytes to %s", sz, app.destination)
 }

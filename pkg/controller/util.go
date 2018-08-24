@@ -665,7 +665,7 @@ func MakeUploadPodSpec(image, verbose, pullPolicy, name string, pvc *v1.Persiste
 					Args: []string{"-v=" + verbose},
 				},
 			},
-			RestartPolicy: v1.RestartPolicyOnFailure,
+			RestartPolicy: v1.RestartPolicyNever,
 			Volumes: []v1.Volume{
 				{
 					Name: DataVolName,

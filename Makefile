@@ -12,15 +12,9 @@
 #See the License for the specific language governing permissions and
 #limitations under the License.
 
-<<<<<<< HEAD
-.PHONY: build build-controller build-importer build-apiserver build-uploadproxy build-uploadserver \
-		docker docker-controller docker-cloner docker-importer docker-apiserver docker-uploadproxy docker-uploadproxy \
+.PHONY: build build-controller build-importer build-apiserver build-uploadproxy build-uploadserver build-functest-image-init build-functest-image-http build-functest \
+		docker docker-controller docker-cloner docker-importer docker-apiserver docker-uploadproxy docker-uploadproxy docker-functest-image-init docker-functest-image-http\
 		cluster-sync cluster-sync-controller cluster-sync-cloner cluster-sync-importer cluster-sync-apiserver cluster-sync-uploadproxy cluster-sync-uploadserver \
-=======
-.PHONY: build build-controller build-importer build-functest-image-init build-functest-image-http build-functest \
-		docker docker-controller docker-cloner docker-importer docker-functest-image-init docker-functest-image-http\
-		cluster-sync cluster-sync-controller cluster-sync-cloner cluster-sync-importer \
->>>>>>> master
 		test test-functional test-unit \
 		publish \
 		vet \

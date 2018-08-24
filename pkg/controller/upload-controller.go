@@ -145,6 +145,8 @@ func (c *UploadController) handleObject(obj interface{}) {
 			return
 		}
 
+		glog.Infof("queueing pvc %+v!!", pvc)
+
 		c.enqueuePVC(pvc)
 		return
 	}

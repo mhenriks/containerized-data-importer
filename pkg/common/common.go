@@ -40,6 +40,10 @@ const (
 	CLONER_SOCKET_PATH    = "/tmp/clone/socket"
 	CLONER_SCRIPT_ARGS    = "/tmp/cloner_startup.sh"
 
+	UPLOAD_SERVER_PODNAME       = "uploadserver"
+	UPLOAD_SERVER_DATA_DIR      = IMPORTER_DATA_DIR
+	UPLOAD_SERVER_SERVICE_LABEL = "service"
+
 	// key names expected in credential secret
 	KeyAccess = "accessKeyId"
 	KeySecret = "secretKey"

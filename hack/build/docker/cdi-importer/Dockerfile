@@ -1,6 +1,6 @@
 FROM fedora:27
 
-RUN dnf install -y qemu-img
+RUN dnf install -y qemu-img && dnf clean all
 
 RUN mkdir /data
 

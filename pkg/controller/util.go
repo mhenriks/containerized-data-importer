@@ -2,8 +2,11 @@ package controller
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"k8s.io/client-go/util/cert/triple"
 
 	"github.com/golang/glog"
 	"github.com/pkg/errors"
@@ -609,11 +612,21 @@ func (c *CloneController) objFromKey(informer cache.SharedIndexInformer, key int
 }
 
 // CreateUploadPod creates upload service pod manifest and sends to server
-func CreateUploadPod(client kubernetes.Interface, image, verbose, pullPolicy, name string, pvc *v1.PersistentVolumeClaim) (*v1.Pod, error) {
+func CreateUploadPod(client kubernetes.Interface, caKeyPair *triple.KeyPair, image, verbose, pullPolicy, name string, pvc *v1.PersistentVolumeClaim) (*v1.Pod, error) {
 	ns := pvc.Namespace
-	pod := MakeUploadPodSpec(image, verbose, pullPolicy, name, pvc)
+	commonName := name + ".namespace"
+	keySecretName := name + "-private-key"
+	certConfigName := name + "-cert"
+	owner := MakeOwnerReference(pvc)
 
-	pod, err := client.CoreV1().Pods(ns).Create(pod)
+	_, err := GetOrCreateServerKeyPair(client, ns, keySecretName, certConfigName, caKeyPair, commonName, name, &owner)
+	if err != nil {
+		return nil, errors.Wrap(err, "Error creating server key pair")
+	}
+
+	pod := MakeUploadPodSpec(image, verbose, pullPolicy, name, pvc, keySecretName, certConfigName)
+
+	pod, err = client.CoreV1().Pods(ns).Create(pod)
 	if err != nil {
 		if apierrs.IsAlreadyExists(err) {
 			pod, err = client.CoreV1().Pods(ns).Get(name, metav1.GetOptions{})
@@ -628,10 +641,35 @@ func CreateUploadPod(client kubernetes.Interface, image, verbose, pullPolicy, na
 	return pod, nil
 }
 
-// MakeUploadPodSpec creates upload service pod manifest
-func MakeUploadPodSpec(image, verbose, pullPolicy, name string, pvc *v1.PersistentVolumeClaim) *v1.Pod {
+// MakeOwnerReference makes owner reference from a PVC
+func MakeOwnerReference(pvc *v1.PersistentVolumeClaim) metav1.OwnerReference {
 	blockOwnerDeletion := true
 	isController := true
+	return metav1.OwnerReference{
+		APIVersion:         "v1",
+		Kind:               "PersistentVolumeClaim",
+		Name:               pvc.Name,
+		UID:                pvc.GetUID(),
+		BlockOwnerDeletion: &blockOwnerDeletion,
+		Controller:         &isController,
+	}
+}
+
+// MakeUploadPodSpec creates upload service pod manifest
+func MakeUploadPodSpec(image, verbose, pullPolicy, name string, pvc *v1.PersistentVolumeClaim, secretName, configName string) *v1.Pod {
+	const (
+		keyVolumeName = "private-key"
+		keyDir        = "/etc/tls/key"
+		keyFile       = "tls.key"
+
+		certVolumeName = "cert"
+		certDir        = "/etc/tls/cert"
+		certFile       = "tls.cert"
+	)
+
+	keyMode := int32(0600)
+	certMode := int32(0644)
+
 	pod := &v1.Pod{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Pod",
@@ -647,14 +685,7 @@ func MakeUploadPodSpec(image, verbose, pullPolicy, name string, pvc *v1.Persiste
 				UPLOAD_SERVER_SERVICE_LABEL: name,
 			},
 			OwnerReferences: []metav1.OwnerReference{
-				metav1.OwnerReference{
-					APIVersion:         "v1",
-					Kind:               "PersistentVolumeClaim",
-					Name:               pvc.Name,
-					UID:                pvc.GetUID(),
-					BlockOwnerDeletion: &blockOwnerDeletion,
-					Controller:         &isController,
-				},
+				MakeOwnerReference(pvc),
 			},
 		},
 		Spec: v1.PodSpec{
@@ -668,6 +699,24 @@ func MakeUploadPodSpec(image, verbose, pullPolicy, name string, pvc *v1.Persiste
 							Name:      DataVolName,
 							MountPath: UPLOAD_SERVER_DATA_DIR,
 						},
+						{
+							Name:      keyVolumeName,
+							MountPath: keyDir,
+						},
+						{
+							Name:      certVolumeName,
+							MountPath: certDir,
+						},
+					},
+					Env: []v1.EnvVar{
+						{
+							Name:  "TLS_KEY_FILE",
+							Value: filepath.Join(keyDir, keyFile),
+						},
+						{
+							Name:  "TLS_CERT_FILE",
+							Value: filepath.Join(certDir, certFile),
+						},
 					},
 					Args: []string{"-v=" + verbose},
 				},
@@ -680,6 +729,38 @@ func MakeUploadPodSpec(image, verbose, pullPolicy, name string, pvc *v1.Persiste
 						PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
 							ClaimName: pvc.Name,
 							ReadOnly:  false,
+						},
+					},
+				},
+				{
+					Name: keyVolumeName,
+					VolumeSource: v1.VolumeSource{
+						Secret: &v1.SecretVolumeSource{
+							SecretName: secretName,
+							Items: []v1.KeyToPath{
+								{
+									Key:  PrivateKeyKeyName,
+									Path: keyFile,
+									Mode: &keyMode,
+								},
+							},
+						},
+					},
+				},
+				{
+					Name: certVolumeName,
+					VolumeSource: v1.VolumeSource{
+						ConfigMap: &v1.ConfigMapVolumeSource{
+							LocalObjectReference: v1.LocalObjectReference{
+								Name: configName,
+							},
+							Items: []v1.KeyToPath{
+								{
+									Key:  CertKeyName,
+									Path: certFile,
+									Mode: &certMode,
+								},
+							},
 						},
 					},
 				},

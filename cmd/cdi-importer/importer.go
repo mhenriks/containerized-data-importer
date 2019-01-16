@@ -51,7 +51,7 @@ func main() {
 	imageSize, _ := util.ParseEnvVar(common.ImporterImageSize, false)
 
 	dest := common.ImporterWritePath
-	if contentType == string(cdiv1.DataVolumeArchive) || source == controller.SourceRegistry {
+	if contentType == string(cdiv1.DataVolumeArchive) {
 		dest = common.ImporterVolumePath
 	}
 

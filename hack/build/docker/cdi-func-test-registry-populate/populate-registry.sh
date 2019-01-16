@@ -60,10 +60,17 @@ function prepareImages {
         mkdir -p $FILENAME$DIR
         cp  $FILENAME $FILENAME$DIR
 
+        locale IMAGE_LOCATION 
+        if [[ $FILENAME == *"gz"* ]]; then
+            IMAGE_LOCATION="/"
+        else
+            IMAGE_LOCATION="/disk"
+        fi
+
         FILE=$FILENAME$DIR"/"$DOCKERFILE
         /bin/cat  >$FILE <<-EOF
-                FROM scratch
-                ADD / $FILENAME
+                FROM kubevirt/container-disk-v1alpha
+                COPY $FILENAME $IMAGE_LOCATION
 EOF
 
         rm $FILENAME
@@ -91,12 +98,12 @@ function pushImages {
         cd $IMAGEDIR
         FILE=$(ls | grep -v $DOCKERFILE)
         declare -l FILE
-        FILE=$FILE
-        echo "building image "$FILE
-        buildah bud -t $FILE":buildah" $images"/"$IMAGEDIR"/"; $retval
+        IMAGENAME=${FILE//.}
+        echo "building image "$IMAGENAME
+        buildah bud -t $IMAGENAME":latest" $images"/"$IMAGEDIR"/"
 	error $retval	
-        echo "pushing image "$FILE" to registry-service: "$resgistry
-        buildah push $registry_tls  $FILE":buildah" "docker://"$registry"/"$FILE; $retVal
+        echo "pushing image "$IMAGENAME" to registry-service: "$registry
+        buildah push $registry_tls  $IMAGENAME":latest" "docker://"$registry"/"$IMAGENAME
 	error $retval
         cd ../
    done

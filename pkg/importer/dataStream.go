@@ -18,6 +18,7 @@ package importer
 
 import (
 	"archive/tar"
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -143,7 +144,8 @@ func newDataStream(dso *DataStreamOptions, stream io.ReadCloser) (*DataStream, e
 	}
 	var ep *url.URL
 	var err error
-	if dso.Source == controller.SourceHTTP || dso.Source == controller.SourceS3 || dso.Source == controller.SourceGlance {
+	if dso.Source == controller.SourceHTTP || dso.Source == controller.SourceS3 ||
+		dso.Source == controller.SourceGlance || dso.Source == controller.SourceRegistry {
 		ep, err = ParseEndpoint(dso.Endpoint)
 		if err != nil {
 			return nil, errors.Wrapf(err, fmt.Sprintf("unable to parse endpoint %q", dso.Endpoint))
@@ -202,6 +204,8 @@ func (d *DataStream) dataStreamSelector() (err error) {
 		r, err = d.s3()
 	case "http", "https":
 		r, err = d.http()
+	case "docker", "oci":
+		r, err = d.registry()
 	default:
 		return errors.Errorf("invalid url scheme: %q", scheme)
 	}
@@ -266,6 +270,86 @@ func (d *DataStream) http() (io.ReadCloser, error) {
 	return countingReader, nil
 }
 
+const (
+	//ContainerDiskImageDir - Expected disk image location in contianer image as described in
+	//https://github.com/kubevirt/kubevirt/blob/master/docs/container-register-disks.md
+	ContainerDiskImageDir = "disk"
+	//TempContainerDiskDir - Temporary location for pulled containerImage
+	TempContainerDiskDir = "/tmp"
+)
+
+//This import source downloads specified container image from registry location
+//Then it extracts the image to a temporary location and expects an image file to be located under /disk directory
+//If such exists it creates a Reader on it and returns it for further processing
+func (d *DataStream) registry() (io.ReadCloser, error) {
+	//generate random name for temporary directory
+	tmpDest := filepath.Join(TempContainerDiskDir, randTmpName(TempContainerDiskDir))
+
+	defer func(f string) {
+		os.Remove(f)
+	}(tmpDest)
+
+	imageDir := filepath.Join(tmpDest, ContainerDiskImageDir)
+
+	//create temporary directory if note exists to which all the data will be extracted
+	if _, err := os.Stat(tmpDest); os.IsNotExist(err) {
+		err := os.Mkdir(tmpDest, os.ModeDir|os.ModePerm)
+		if err != nil {
+			return nil, errors.Wrapf(err, fmt.Sprintf("Failed to create tempdirectory %s", tmpDest))
+		}
+	}
+
+	//copy image from registry to the temporary location
+	glog.V(1).Infof("using skopeo to copy from registry")
+	err := image.CopyDirFromRegistryImage(d.Endpoint, tmpDest, ContainerDiskImageDir, d.AccessKey, d.SecKey)
+	if err != nil {
+		return nil, errors.Wrapf(err, fmt.Sprintf("Failed ro read from registry"))
+	}
+
+	//Search for file in /disk directory - if not found - failure
+	imageFile, err := getImageFileName(imageDir)
+	if err != nil {
+		return nil, errors.Wrapf(err, fmt.Sprintf("Cannot locate image file"))
+	}
+
+	// 3. If found - Create a reader that will read this file and attach it to the dataStream
+	file, err := os.Open(filepath.Join(imageDir, imageFile))
+	if err != nil {
+		return nil, errors.Wrapf(err, fmt.Sprintf("Fail to create data stream from image file"))
+	}
+
+	glog.V(1).Infof("VM disk image filename is %s", imageFile)
+
+	return ioutil.NopCloser(bufio.NewReader(file)), nil
+}
+
+func getImageFileName(dir string) (string, error) {
+
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return "", errors.Wrapf(err, fmt.Sprintf("image directory does not exist "))
+	}
+
+	imageDir, err := os.Open(dir)
+
+	if err != nil {
+		return "", errors.Wrapf(err, fmt.Sprintf("Cannot read from image directory"))
+	}
+
+	defer imageDir.Close()
+
+	fileslist, err := imageDir.Readdirnames(0) // 0 to read all files and folders
+	if len(fileslist) == 0 || err != nil {
+		return "", errors.Wrapf(err, fmt.Sprintf("image file does not exist in image directory"))
+	}
+
+	//here we will take the last file as it is done in containerDisk logic
+	filename := fileslist[len(fileslist)-1]
+
+	glog.V(1).Infof("VM disk image filename is %s", filename)
+
+	return filename, nil
+}
+
 func (d *DataStream) pollProgress(reader *util.CountingReader, idleTime, pollInterval time.Duration) {
 	count := reader.Current
 	lastUpdate := time.Now()
@@ -292,9 +376,6 @@ func (d *DataStream) pollProgress(reader *util.CountingReader, idleTime, pollInt
 func CopyData(dso *DataStreamOptions) error {
 	glog.V(1).Infof("copying %q to %q...\n", dso.Endpoint, dso.Dest)
 	switch dso.Source {
-	case controller.SourceRegistry:
-		glog.V(1).Infof("using skopeo to copy from registry")
-		return image.CopyRegistryImage(dso.Endpoint, dso.Dest, dso.AccessKey, dso.SecKey)
 	default:
 		ds, err := NewDataStream(dso)
 		if err != nil {

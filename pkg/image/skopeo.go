@@ -95,6 +95,61 @@ func CopyRegistryImage(url, dest, accessKey, secKey string) error {
 	return err
 }
 
+// CopyDirFromRegistryImage download image from registry with skopeo and extracts a specific directory from it
+func CopyDirFromRegistryImage(url, dest, VMimagePath, accessKey, secKey string) error {
+	skopeoDest := "dir:" + dest + dataTmpDir
+	err := SkopeoInterface.CopyImage(url, skopeoDest, accessKey, secKey)
+	if err != nil {
+		os.RemoveAll(dest + dataTmpDir)
+		return errors.Wrap(err, "Failed to download from registry")
+	}
+	err = extractVMDiskImageDir(dest, VMimagePath)
+	if err != nil {
+		return errors.Wrap(err, "Failed to extract image layers")
+	}
+
+	// Clean temp folder
+	os.RemoveAll(dest + dataTmpDir)
+
+	return err
+}
+
+//extractVMDiskImageDir - from each layer extracts only disk/ directory
+//Since this is the oly one that is in intereset right now
+var extractVMDiskImageDir = func(dest, VMimagePath string) error {
+	glog.V(1).Infof("extracting image layer with vm image to %q\n", dest)
+	// Parse manifest file
+	manifest, err := getImageManifest(dest + dataTmpDir)
+	if err != nil {
+		return err
+	}
+
+	// Extract layers
+	var layers []layer
+	if manifest.SchemaVersion == 1 {
+		layers = manifest.FsLayers
+	} else {
+		layers = manifest.Layers
+	}
+	for _, m := range layers {
+		var layerID string
+		if manifest.SchemaVersion == 1 {
+			layerID = m.BlobSum
+		} else {
+			layerID = m.Digest
+		}
+		layer := strings.TrimPrefix(layerID, "sha256:")
+		filePath := filepath.Join(dest, dataTmpDir, layer)
+
+		//Ignore errors since the directory might not be in all layers
+		util.UnArchiveSingleDirTar(filePath, dest, VMimagePath)
+
+		err = cleanWhiteoutFiles(dest)
+	}
+
+	return err
+}
+
 var extractImageLayers = func(dest string) error {
 	glog.V(1).Infof("extracting image layers to %q\n", dest)
 	// Parse manifest file

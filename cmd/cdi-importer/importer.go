@@ -54,10 +54,12 @@ func main() {
 	if contentType == string(cdiv1.DataVolumeArchive) {
 		dest = common.ImporterVolumePath
 	}
+	dataDir := common.ImporterDataDir
 
 	glog.V(1).Infoln("begin import process")
 	dso := &importer.DataStreamOptions{
 		dest,
+		dataDir,
 		ep,
 		acc,
 		sec,

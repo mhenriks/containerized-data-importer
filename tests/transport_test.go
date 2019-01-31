@@ -126,7 +126,7 @@ var _ = Describe("Transport Tests", func() {
 		Entry("should not connect to http endpoint with invalid credentials", httpAuthEp, targetFile, "gopats", "bradyisthegoat", controller.SourceHTTP, false),
 		Entry("should connect to QCOW http endpoint without credentials", httpNoAuthEp, targetQCOWFile, "", "", controller.SourceHTTP, true),
 		Entry("should connect to QCOW http endpoint with credentials", httpAuthEp, targetQCOWFile, utils.AccessKeyValue, utils.SecretKeyValue, controller.SourceHTTP, true),
-		Entry("should connect to registry endpoint without credentials", registryNoAuthEp, targetQCOWImage, "", "", controller.SourceRegistry, true),
 		Entry("should fail to import from registry endpoint when container image is invalid", registryNoAuthEp, targetRegistryInvalidImage, "", "", controller.SourceRegistry, false),
+		Entry("should connect to registry endpoint without credentials", registryNoAuthEp, targetQCOWImage, "", "", controller.SourceRegistry, true),
 	)
 })

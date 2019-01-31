@@ -129,7 +129,6 @@ func ExrtactSingleDirTar(reader io.Reader, destDir string, extractDir string) er
 	err = untar.Wait()
 	if err != nil {
 		glog.V(3).Infof("%s\n", string(errBuf.Bytes()))
-		glog.Errorf("%s\n", err.Error())
 		return err
 	}
 

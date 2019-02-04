@@ -113,9 +113,9 @@ func UnArchiveTar(reader io.Reader, destDir string, arg ...string) error {
 	return nil
 }
 
-// ExrtactSingleDirTar unarchives a tar file and streams its files
+// ExtractSingleDirTar unarchives a tar file and streams its files
 // using the specified io.Reader to the specified destination.
-func ExrtactSingleDirTar(reader io.Reader, destDir string, extractDir string) error {
+func ExtractSingleDirTar(reader io.Reader, destDir string, extractDir string) error {
 	glog.V(1).Infof("begin untar directory ...\n")
 	args := "-zxvC"
 	untar := exec.Command("/usr/bin/tar", args, destDir, extractDir)
@@ -135,14 +135,14 @@ func ExrtactSingleDirTar(reader io.Reader, destDir string, extractDir string) er
 	return nil
 }
 
-// UnArchiveSingleDirTar extracts a  extractDir from local tar file to the specified destination.
-func UnArchiveSingleDirTar(filePath, destDir string, extractDir string) error {
+// UnArchiveSingleDirFromLocalTar extracts a specified extractDir from local tar file to the specified destination.
+func UnArchiveSingleDirFromLocalTar(filePath, destDir string, extractDir string) error {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return errors.Wrap(err, "could not open tar file")
 	}
 	fileReader := bufio.NewReader(file)
-	return ExrtactSingleDirTar(fileReader, destDir, extractDir)
+	return ExtractSingleDirTar(fileReader, destDir, extractDir)
 }
 
 // UnArchiveLocalTar unarchives a local tar file to the specified destination.

@@ -62,6 +62,11 @@ var _ DataStreamInterface = &DataStream{}
 
 var qemuOperations = image.NewQEMUOperations()
 
+//DataContext - allows cleanup of temporary data created by specific import method
+type DataContext interface {
+	Cleanup() error
+}
+
 // DataStream implements the ReadCloser interface
 type DataStream struct {
 	*DataStreamOptions
@@ -74,6 +79,7 @@ type DataStream struct {
 	Size        int64
 	ctx         context.Context
 	cancel      context.CancelFunc
+	dataCtxt    DataContext
 }
 
 type reader struct {
@@ -126,6 +132,8 @@ var rdrTypM = map[string]int{
 
 //Data stream helper methods
 func (d *DataStream) isCopyToTmpRequired() bool {
+	//if it is unarchived qcow file that is already stored
+	//then no copy to tmp is required
 	if d.isQemu() && d.isStored() && !d.isArchived() {
 		return false
 	}
@@ -191,6 +199,7 @@ func newDataStream(dso *DataStreamOptions, stream io.ReadCloser) (*DataStream, e
 		tmpDataPath:       "",
 		qemu:              false,
 		archived:          false,
+		dataCtxt:          nil,
 	}
 
 	// establish readers for endpoint's formats and do initial calc of size of raw endpt
@@ -222,6 +231,12 @@ func (d *DataStream) Close() error {
 	err := closeReaders(d.Readers)
 	if d.cancel != nil {
 		d.cancel()
+	}
+	if d.dataCtxt != nil {
+		dataCtxtErr := d.dataCtxt.Cleanup()
+		if dataCtxtErr != nil {
+			glog.Errorf(dataCtxtErr.Error(), "DataCtxt cleanup failed")
+		}
 	}
 	return err
 }
@@ -305,43 +320,27 @@ func (d *DataStream) http() (io.ReadCloser, error) {
 	return countingReader, nil
 }
 
+//registryData - temporary data used by import from registry flow
+//is deleted as part of dataStream.Close()
 type registryData struct {
 	dataDir string
 	file    *os.File
 }
 
-func (r *registryData) Close() error {
+func (r registryData) Cleanup() error {
 	glog.V(1).Infof("registryData - deleting all the data")
-	if _regData.file != nil {
-		_regData.file.Close()
+	if r.file != nil {
+		r.file.Close()
 	}
-	err := os.RemoveAll(_regData.dataDir)
+	err := os.RemoveAll(r.dataDir)
 	if err != nil {
 		glog.Errorf(" Failed removing directory ", err.Error())
 	}
 	return nil
 }
 
-//_regData - global variable that stores temporary data of registy flow
-// to be deleted when teh flow ends
-var _regData = registryData{"", nil}
-
-type registryDataCloser struct {
-	io.Reader
-}
-
-func (registryDataCloser) Close() error {
-	return _regData.Close()
-}
-
-// RegistryDataCloser returns a ReadCloser with a Close method wrapping delettion
-// of temporary data of registry flow
-func RegistryDataCloser(r io.Reader) io.ReadCloser {
-	return registryDataCloser{r}
-}
-
 const (
-	//ContainerDiskImageDir - Expected disk image location in contianer image as described in
+	//ContainerDiskImageDir - Expected disk image location in container image as described in
 	//https://github.com/kubevirt/kubevirt/blob/master/docs/container-register-disks.md
 	ContainerDiskImageDir = "disk"
 	//TempContainerDiskDir - Temporary location for pulled containerImage
@@ -352,54 +351,56 @@ const (
 //Then it extracts the image to a temporary location and expects an image file to be located under /disk directory
 //If such exists it creates a Reader on it and returns it for further processing
 func (d *DataStream) registry() (io.ReadCloser, error) {
-	//generate random name for temporary directory
-	_regData.dataDir = filepath.Join(d.DataDir, TempContainerDiskDir)
 
-	imageDir := filepath.Join(_regData.dataDir, ContainerDiskImageDir)
+	tmpData := registryData{"", nil}
+	tmpData.dataDir = filepath.Join(d.DataDir, TempContainerDiskDir)
 
-	//create temporary directory if note exists to which all the data will be extracted
-	if _, err := os.Stat(_regData.dataDir); os.IsNotExist(err) {
-		err := os.Mkdir(_regData.dataDir, os.ModeDir|os.ModePerm)
+	imageDir := filepath.Join(tmpData.dataDir, ContainerDiskImageDir)
+
+	//1. create temporary directory if does not exist to which all the data will be extracted
+	if _, err := os.Stat(tmpData.dataDir); os.IsNotExist(err) {
+		err := os.Mkdir(tmpData.dataDir, os.ModeDir|os.ModePerm)
 		if err != nil {
 			glog.Errorf("Failed to create temporary directory")
-			return nil, errors.Wrapf(err, fmt.Sprintf("Failed to create tempdirectory %s", _regData.dataDir))
+			return nil, errors.Wrapf(err, fmt.Sprintf("Failed to create tempdirectory %s", tmpData.dataDir))
 		}
 	}
 
-	//copy image from registry to the temporary location
+	//2. copy image from registry to the temporary location
 	glog.V(1).Infof("using skopeo to copy from registry")
-	err := image.CopyDirFromRegistryImage(d.Endpoint, _regData.dataDir, ContainerDiskImageDir, d.AccessKey, d.SecKey)
+	err := image.CopyDirFromRegistryImage(d.Endpoint, tmpData.dataDir, ContainerDiskImageDir, d.AccessKey, d.SecKey)
 	if err != nil {
-		_regData.Close()
+		tmpData.Cleanup()
 		glog.Errorf("Failed to read data from registry")
 		return nil, errors.Wrapf(err, fmt.Sprintf("Failed ro read from registry"))
 	}
 
-	//Search for file in /disk directory - if not found - failure
+	//3. Search for file in /disk directory - if not found - failure
 	imageFile, err := getImageFileName(imageDir)
 	if err != nil {
-		_regData.Close()
+		tmpData.Cleanup()
 		glog.Errorf("Error getting Image file from imageDirectory")
 		return nil, errors.Wrapf(err, fmt.Sprintf("Cannot locate image file"))
 	}
 
 	if len(strings.TrimSpace(imageFile)) == 0 {
-		_regData.Close()
+		tmpData.Cleanup()
 		glog.Errorf("Image file is not found in image directory - filename is empty")
 		return nil, errors.Errorf(fmt.Sprintf("Cannot locate image file"))
 	}
-	// 3. If found - Create a reader that will read this file and attach it to the dataStream
-	_regData.file, err = os.Open(filepath.Join(imageDir, imageFile))
+	// 4. If found - Create a reader that will read this file and attach it to the dataStream
+	tmpData.file, err = os.Open(filepath.Join(imageDir, imageFile))
 	if err != nil {
-		_regData.Close()
+		tmpData.Cleanup()
 		glog.Errorf("Failed to open image file")
 		return nil, errors.Wrapf(err, fmt.Sprintf("Fail to create data stream from image file"))
 	}
 
 	d.tmpDataPath = filepath.Join(imageDir, imageFile)
+	d.dataCtxt = tmpData
 	glog.V(1).Infof("Sucecssfully found file. VM disk image filename is %s", imageFile)
 
-	return RegistryDataCloser(bufio.NewReader(_regData.file)), nil
+	return ioutil.NopCloser(bufio.NewReader(tmpData.file)), nil
 }
 
 func getImageFileName(dir string) (string, error) {

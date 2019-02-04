@@ -60,7 +60,7 @@ function prepareImages {
         mkdir -p $FILENAME$DIR
         cp  $FILENAME $FILENAME$DIR
 
-        locale IMAGE_LOCATION 
+        local IMAGE_LOCATION 
         if [[ $FILENAME == *"gz"* ]]; then
             IMAGE_LOCATION="/"
         else
@@ -96,8 +96,8 @@ function pushImages {
    shopt -s nullglob
    for IMAGEDIR in *$DIR; do
         cd $IMAGEDIR
-        FILE=$(ls | grep -v $DOCKERFILE)
         declare -l FILE
+        FILE=$(ls | grep -v $DOCKERFILE)
         IMAGENAME=${FILE//.}
         echo "building image "$IMAGENAME
         buildah bud -t $IMAGENAME":latest" $images"/"$IMAGEDIR"/"

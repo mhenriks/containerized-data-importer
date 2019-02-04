@@ -140,6 +140,10 @@ func (d *DataStream) isCopyToTmpRequired() bool {
 	return true
 }
 
+func (d *DataStream) isMovble() bool {
+	return d.isStored() && !d.qemu && !d.archived
+}
+
 func (d *DataStream) getTmpDataPath() string {
 	return d.tmpDataPath
 }
@@ -906,6 +910,9 @@ func (d *DataStream) copy(dest string) error {
 		if err != nil {
 			return err
 		}
+	} else if d.isMovble() {
+		glog.Infof("Moving this crap %s to %s", d.tmpDataPath, dest)
+		os.Rename(d.tmpDataPath, dest)
 	} else {
 		dest = filepath.Clean(dest)
 		glog.V(2).Infof("copying image file to %q", dest)

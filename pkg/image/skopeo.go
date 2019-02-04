@@ -98,18 +98,17 @@ func CopyRegistryImage(url, dest, accessKey, secKey string) error {
 // CopyDirFromRegistryImage download image from registry with skopeo and extracts a specific directory from it
 func CopyDirFromRegistryImage(url, dest, VMimagePath, accessKey, secKey string) error {
 	skopeoDest := "dir:" + dest + dataTmpDir
+
 	err := SkopeoInterface.CopyImage(url, skopeoDest, accessKey, secKey)
+
+	defer os.RemoveAll(dest + dataTmpDir)
 	if err != nil {
-		os.RemoveAll(dest + dataTmpDir)
 		return errors.Wrap(err, "Failed to download from registry")
 	}
 	err = extractVMDiskImageDir(dest, VMimagePath)
 	if err != nil {
 		return errors.Wrap(err, "Failed to extract image layers")
 	}
-
-	// Clean temp folder
-	os.RemoveAll(dest + dataTmpDir)
 
 	return err
 }

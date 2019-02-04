@@ -113,6 +113,7 @@ var _ = Describe("Transport Tests", func() {
 			}
 		} else {
 			By("Verifying PVC is empty")
+			utils.WaitTimeoutForPodStatus(c, common.ImporterPodName, "cdi", v1.PodFailed, utils.PodWaitForTime)
 			Expect(framework.VerifyPVCIsEmpty(f, pvc)).To(BeTrue(), fmt.Sprintf("Found 0 imported files on PVC %q", pvc.Namespace+"/"+pvc.Name))
 		}
 	}

@@ -366,7 +366,7 @@ var _ = Describe("Controller", func() {
 						Name:      "foo",
 						Namespace: "default",
 						Labels: map[string]string{
-							"cdi.kubevirt.io": "",
+							"cdi.kubevirt.io": "cdi-upload-server",
 						},
 					},
 				}

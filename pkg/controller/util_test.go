@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/client-go/util/cert"
-
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/pkg/apis/volumesnapshot/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
@@ -33,6 +31,7 @@ import (
 	. "kubevirt.io/containerized-data-importer/pkg/common"
 	"kubevirt.io/containerized-data-importer/pkg/keys"
 	"kubevirt.io/containerized-data-importer/pkg/token"
+	"kubevirt.io/containerized-data-importer/pkg/util/cert"
 )
 
 func TestController_pvcFromKey(t *testing.T) {
